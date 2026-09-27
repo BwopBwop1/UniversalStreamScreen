@@ -2,6 +2,8 @@
 // gcc complains about sdl unless done this way probably a user error.
 // ffs. -Byte
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 stb` -lm
+//
+// gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3_ttf` -lm
 
 
 #include <stdio.h>
@@ -179,11 +181,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 }
 
 struct Star {
- float x,
- float y,
+ float x;
+ float y;
  SDL_FRect region;
  SDL_Texture *texture;
-}
+};
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
  const double now = ((double)SDL_GetTicks()) / 1000.0;  
