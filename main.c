@@ -27,7 +27,8 @@
 
 #include <SDL3_ttf/SDL_ttf.h>
 
-char *center_text = ("Be Right Back.");
+char *center_text_buffer = 0;
+int center_text_len = 4096;
 
 const char *font_path = ("assets/fonts/font.ttf");
 const char *gone_away_path = ("assets/txts/gone_away_messages.txt");
@@ -41,6 +42,25 @@ SDL_Window *window = 0;
 SDL_Renderer *renderer = 0;
 SDL_Texture *texture = 0;
 TTF_Font *font = 0;
+
+void str_copy_to(char *b1, int amount, char *b2) {
+ char *src = b1;
+ char *dst = b2;
+
+ for (int i = 0; i < amount; i++) {
+    *dst++ = *src++;
+ }
+}
+
+char * str_copy_inplace(const char *b1, int amount, char *b2) {
+ const char *src = b1;
+ char *dst = b2;
+
+ for (int i = 0; i < amount; i++) {
+    *dst++ = *src++;
+ }
+ return dst;
+}
 
 void str_total(char *file, char delimiter, int *total) {
  int t = 0;
@@ -129,15 +149,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
  SDL_Color bg = {255, 255, 255, 0};
  
+ center_text_buffer = malloc(center_text_len);
+ 
  int total = 0;
  str_total(gone_away_messages, '\n', &total);
- int r = SDL_rand(total + 1);
+ int r = SDL_rand(total);
  
  int location = 0;
  int size = 0;
  str_cut(gone_away_messages, r, &location, &size, '\n');
- SDL_Surface *text = TTF_RenderText_Shaded(font, gone_away_messages + location, size, fg, bg);
-
+ str_copy_to(gone_away_messages + location, size, center_text_buffer);
+ printf("%s\n", center_text_buffer);
+ SDL_Surface *text = TTF_RenderText_Shaded(font, center_text_buffer, 0, fg, bg);
  if (text) {
   texture = SDL_CreateTextureFromSurface(renderer, text);
   SDL_DestroySurface(text);
@@ -202,6 +225,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
+
+  free(gone_away_messages);
+  free(center_text_buffer);
+
+  SDL_DestroyTexture(texture);
+
   if (font) {
    TTF_CloseFont(font);
   }
