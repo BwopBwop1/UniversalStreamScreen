@@ -18,6 +18,7 @@
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include "SDL3/SDL.h"
+#include "SDL3/SDL_stdinc.h"
 #include "SDL3/SDL_main.h"
 #include "SDL3/SDL_surface.h"
 #include "SDL3/SDL_render.h"
@@ -27,22 +28,86 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 char *center_text = ("Be Right Back.");
-const char *font_path = ("font.ttf");
+
+const char *font_path = ("assets/fonts/font.ttf");
+const char *gone_away_path = ("assets/txts/gone_away_messages.txt");
+
+void *gone_away_messages = 0;
 
 int Window_Width = 960;
 int Window_Height = 540;
 
-SDL_Window *window = NULL;
-SDL_Renderer *renderer = NULL;
-SDL_Texture *texture = NULL;
-TTF_Font *font = NULL;
+SDL_Window *window = 0;
+SDL_Renderer *renderer = 0;
+SDL_Texture *texture = 0;
+TTF_Font *font = 0;
+
+void str_total(char *file, char delimiter, int *total) {
+ int t = 0;
+ for (char *c = file; *c; c++) { 
+  char current_char = *c;
+  
+  if (current_char == delimiter) {
+   t++;
+  }
+ }
+ 
+  *total = t;
+}
+
+// Will parse and fill two ints for bounds with location and size
+void str_cut(char *file, int idx, int *location, int *size, char delimiter) {
+ int loc = 0;
+ int s = 0;
+
+ int index = 0;
+ int i = 0;
+
+ for (char *c = file; *c; c++) { 
+  char current_char = *c;
+  
+  if (current_char == delimiter) {
+    s = i - loc;
+
+   if (index == idx) {
+    break;
+   } 
+
+   loc = i + 1;
+   index++;
+  }
+  
+  i++;
+ }
+
+ *location = loc;
+ *size = s;
+}
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
+
+
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
   return SDL_APP_FAILURE;
  }
 
+ SDL_IOStream *gone_away_file = SDL_IOFromFile(gone_away_path, "r");
+ if (!gone_away_file) {
+  SDL_Log("Couldn't read gone_away_file %s\n", SDL_GetError());
+  return SDL_APP_FAILURE;
+ }
+ 
+ int file_size = SDL_GetIOSize(gone_away_file);
+ gone_away_messages = malloc(file_size);
+ SDL_ReadIO(gone_away_file, gone_away_messages, file_size);
+ if (!gone_away_messages) {
+  SDL_Log("Couldn't load gone_away_file into memory %s\n", SDL_GetError());
+  return SDL_APP_FAILURE;
+ }
+
+ SDL_CloseIO(gone_away_file);
+ 
  if (!SDL_CreateWindowAndRenderer("Test Application", 
 			 Window_Width, Window_Height, 
 			 SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS, &window, &renderer)) {
@@ -63,7 +128,16 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
  SDL_Color bg = {255, 255, 255, 0};
- SDL_Surface *text = TTF_RenderText_Shaded(font, center_text, 0, fg, bg);
+ 
+ int total = 0;
+ str_total(gone_away_messages, '\n', &total);
+ int r = SDL_rand(total + 1);
+ 
+ int location = 0;
+ int size = 0;
+ str_cut(gone_away_messages, r, &location, &size, '\n');
+ SDL_Surface *text = TTF_RenderText_Shaded(font, gone_away_messages + location, size, fg, bg);
+
  if (text) {
   texture = SDL_CreateTextureFromSurface(renderer, text);
   SDL_DestroySurface(text);
