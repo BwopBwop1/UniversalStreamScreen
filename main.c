@@ -197,7 +197,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  switch (event->type) {
   case SDL_EVENT_KEY_DOWN: {
    if (event->key.key == SDLK_SPACE && !event->key.repeat) {
-    SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
+    int r = SDL_rand(256);
+    int g = SDL_rand(256);
+    int b = SDL_rand(256);
+
+    SDL_Color fg = {r, g, b, SDL_ALPHA_OPAQUE};
     SDL_Color bg = {255, 255, 255, 0};
 
     regen_text_buffer(center_text_buffer);
