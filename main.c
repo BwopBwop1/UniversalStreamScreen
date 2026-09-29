@@ -43,6 +43,12 @@ SDL_Renderer *renderer = 0;
 SDL_Texture *texture = 0;
 TTF_Font *font = 0;
 
+void str_zero(char *b1) {
+ for (char *c = b1; *c; c++) { 
+  *c = 0;
+ }
+}
+
 void str_copy_to(char *b1, int amount, char *b2) {
  char *src = b1;
  char *dst = b2;
@@ -104,8 +110,33 @@ void str_cut(char *file, int idx, int *location, int *size, char delimiter) {
  *size = s;
 }
 
-SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
+void generate_text_texture(SDL_Texture **tex, char *txt, SDL_Color fg, SDL_Color bg) {
+ SDL_Texture *temp = 0;
 
+ SDL_Surface *text = TTF_RenderText_Shaded(font, txt, 0, fg, bg);
+ if (text) {
+  temp = SDL_CreateTextureFromSurface(renderer, text);
+  SDL_DestroySurface(text);
+ }
+ if (!temp) {
+  SDL_Log("Couldn't create text: %s\n", SDL_GetError());
+ }
+
+ *tex = temp;
+}
+
+void regen_text_buffer(char *txt) {
+ int total = 0;
+ str_total(gone_away_messages, '\n', &total);
+ int r = SDL_rand(total);
+
+ int location = 0;
+ int size = 0;
+ str_cut(gone_away_messages, r, &location, &size, '\n');
+ str_zero(txt);
+ str_copy_to(gone_away_messages + location, size, txt);
+}
+SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
@@ -151,25 +182,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  
  center_text_buffer = malloc(center_text_len);
  
- int total = 0;
- str_total(gone_away_messages, '\n', &total);
- int r = SDL_rand(total);
- 
- int location = 0;
- int size = 0;
- str_cut(gone_away_messages, r, &location, &size, '\n');
- str_copy_to(gone_away_messages + location, size, center_text_buffer);
- printf("%s\n", center_text_buffer);
- SDL_Surface *text = TTF_RenderText_Shaded(font, center_text_buffer, 0, fg, bg);
- if (text) {
-  texture = SDL_CreateTextureFromSurface(renderer, text);
-  SDL_DestroySurface(text);
- }
- if (!texture) {
-  SDL_Log("Couldn't create text: %s\n", SDL_GetError());
-  return SDL_APP_FAILURE;
- }
-
+ regen_text_buffer(center_text_buffer);
+ generate_text_texture(&texture, center_text_buffer, fg, bg);
  
  if (!SDL_SetWindowFullscreen(window, true)) {
   SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
@@ -183,7 +197,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  switch (event->type) {
   case SDL_EVENT_KEY_DOWN: {
    if (event->key.key == SDLK_SPACE && !event->key.repeat) {
-    printf("pressed space\n");
+    SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
+    SDL_Color bg = {255, 255, 255, 0};
+
+    regen_text_buffer(center_text_buffer);
+    generate_text_texture(&texture, center_text_buffer, fg, bg);
    }
   } break;
   case SDL_EVENT_QUIT: {
