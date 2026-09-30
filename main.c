@@ -5,7 +5,6 @@
 //
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,16 +26,16 @@
 
 #include <SDL3_ttf/SDL_ttf.h>
 
-char *center_text_buffer = 0;
-int center_text_len = 4096;
+uint8_t *center_text_buffer = 0;
+int32_t center_text_len = 4096;
+
+int32_t dirty = 0;
+#define MSToS(value) (value * 1000)
 
 const char *font_path = ("assets/fonts/font.ttf");
 const char *gone_away_path = ("assets/txts/gone_away_messages.txt");
 
 void *gone_away_messages = 0;
-
-int Window_Width = 960;
-int Window_Height = 540;
 
 SDL_Window *window = 0;
 SDL_Renderer *renderer = 0;
@@ -81,7 +80,6 @@ void str_total(char *file, char delimiter, int *total) {
   *total = t;
 }
 
-// Will parse and fill two ints for bounds with location and size
 void str_cut(char *file, int idx, int *location, int *size, char delimiter) {
  int loc = 0;
  int s = 0;
@@ -121,10 +119,11 @@ void generate_text_texture(SDL_Texture **tex, char *txt, SDL_Color fg, SDL_Color
  if (!temp) {
   SDL_Log("Couldn't create text: %s\n", SDL_GetError());
  }
-
  *tex = temp;
 }
 
+
+// TODO: function could be converted to be more universal.
 void regen_text_buffer(char *txt) {
  int total = 0;
  str_total(gone_away_messages, '\n', &total);
@@ -136,6 +135,58 @@ void regen_text_buffer(char *txt) {
  str_zero(txt);
  str_copy_to(gone_away_messages + location, size, txt);
 }
+
+struct Star {
+ float x;
+ float y;
+ SDL_FRect region;
+ SDL_Texture *texture;
+};
+
+#define STAR_MAX 100
+#define STAR_SIZE 16
+struct Stars {
+ uint32_t count;
+ struct Star s[100];
+};
+struct Stars all_star;
+
+Uint32 spawn_star(void *userdata, SDL_TimerID id, Uint32 interval) {
+
+ if (all_star.count >= STAR_MAX) {
+  return interval;
+ }
+ 
+ int w;
+ int h;
+ SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
+
+ int half_w = (w/2);
+
+ int r = SDL_rand(half_w + 1) + (half_w - (STAR_SIZE));
+ int y = 0;
+
+ printf("(%d): (%d, %d)\n", all_star.count, r, y);
+
+ all_star.s[all_star.count].x = r;
+ all_star.s[all_star.count].y = y;
+
+ all_star.count++;
+
+ return interval;
+}
+
+Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval) {
+
+ printf("%s : %d\n", center_text_buffer, interval);
+
+
+ regen_text_buffer(center_text_buffer);
+ dirty = 1;
+
+ return interval;
+}
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -158,9 +209,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  }
 
  SDL_CloseIO(gone_away_file);
- 
+
  if (!SDL_CreateWindowAndRenderer("Test Application", 
-			 Window_Width, Window_Height, 
+			 0, 0, 
 			 SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS, &window, &renderer)) {
   SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -184,7 +235,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  
  regen_text_buffer(center_text_buffer);
  generate_text_texture(&texture, center_text_buffer, fg, bg);
- 
+
+ SDL_AddTimer(MSToS(1), spawn_star, 0);
+ SDL_AddTimer(MSToS(15), change_text, 0);
+
  if (!SDL_SetWindowFullscreen(window, true)) {
   SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -196,6 +250,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  switch (event->type) {
   case SDL_EVENT_KEY_DOWN: {
+
+   if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
+    return SDL_APP_SUCCESS;
+   } 
+
    if (event->key.key == SDLK_SPACE && !event->key.repeat) {
     int r = SDL_rand(256);
     int g = SDL_rand(256);
@@ -219,13 +278,6 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  return SDL_APP_CONTINUE;
 }
 
-struct Star {
- float x;
- float y;
- SDL_FRect region;
- SDL_Texture *texture;
-};
-
 void draw_text(SDL_Renderer *renderer, float x, float y, float scale) {
  float width = texture->w * scale;
  float height = texture->h * scale;
@@ -236,6 +288,14 @@ void draw_text(SDL_Renderer *renderer, float x, float y, float scale) {
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
+ if (dirty) {
+  SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
+  SDL_Color bg = {255, 255, 255, 0};
+
+  generate_text_texture(&texture, center_text_buffer, fg, bg);
+ }
+ 
+
  const double now = ((double)SDL_GetTicks()) / 1000.0;  
 
  const float red = (float) (0.5 + 0.5 * SDL_sin(now));
@@ -243,6 +303,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.0, SDL_ALPHA_OPAQUE_FLOAT); 
 
  SDL_RenderClear(renderer);
+
+ for (int i = 0; i < all_star.count; i++) {
+  int x = all_star.s[i].x;
+  int y = all_star.s[i].y;
+
+
+  SDL_FRect dst = {.x = x, .y = y, .w = STAR_SIZE, .h = STAR_SIZE};
+
+  SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.8, SDL_ALPHA_OPAQUE_FLOAT); 
+  SDL_RenderRect(renderer, &dst);
+ }
 
  SDL_SetRenderDrawColorFloat(renderer, 1.0, 1.0, 1.0, SDL_ALPHA_OPAQUE_FLOAT);
  
