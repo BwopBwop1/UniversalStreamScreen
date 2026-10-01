@@ -139,48 +139,15 @@ void regen_text_buffer(char *txt) {
  str_copy_to(gone_away_messages + location, size, txt);
 }
 
-typedef struct Star {
- float x;
- float y;
- float dx;
- float dy;
- SDL_FRect region;
- SDL_Texture *texture;
-} Star;
+typedef struct particle {
+ float x, y;
+ float dx, dy; 
+ float ddx, ddy;
 
-#define STAR_MAX 100
-#define STAR_SIZE 16
-typedef struct Stars {
- uint32_t count;
- Star s[STAR_MAX];
-} Stars;
-Stars all_star;
+ SDL_Color color;
+} particle;
 
 Uint32 spawn_star(void *userdata, SDL_TimerID id, Uint32 interval) {
-
- if (all_star.count >= STAR_MAX) {
-  return interval;
- }
- 
- int w;
- int h;
- SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
-
- int half_w = (w/2);
-
- int r = SDL_rand(half_w + 1) + (half_w - (STAR_SIZE));
- int y = 0;
-
- printf("(%d): (%d, %d)\n", all_star.count, r, y);
-
- all_star.s[all_star.count].x = r;
- all_star.s[all_star.count].y = y;
-
- all_star.s[all_star.count].dx = -50;
- all_star.s[all_star.count].dy = 50;
-
- all_star.count++;
-
  return interval;
 }
 
@@ -196,7 +163,6 @@ Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval) {
 }
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
-
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -317,23 +283,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  int w;
  int h;
  SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
-
- for (int i = 0; i < all_star.count; i++) {
-
-  if (all_star.s[i].y < h - STAR_SIZE) {
-   all_star.s[i].x += all_star.s[i].dx * (float)(now - last);
-   all_star.s[i].y += all_star.s[i].dy * (float)(now - last);
-  }
-  
-  int x = all_star.s[i].x;
-  int y = all_star.s[i].y;
-
-  
-  SDL_FRect dst = {.x = x, .y = y, .w = STAR_SIZE, .h = STAR_SIZE};
-
-  SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.8, SDL_ALPHA_OPAQUE_FLOAT); 
-  SDL_RenderRect(renderer, &dst);
- }
 
  SDL_SetRenderDrawColorFloat(renderer, 1.0, 1.0, 1.0, SDL_ALPHA_OPAQUE_FLOAT);
  
