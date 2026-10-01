@@ -42,6 +42,9 @@ SDL_Renderer *renderer = 0;
 SDL_Texture *texture = 0;
 TTF_Font *font = 0;
 
+double now = 0;
+double last = 0;
+
 void str_zero(char *b1) {
  for (char *c = b1; *c; c++) { 
   *c = 0;
@@ -136,20 +139,22 @@ void regen_text_buffer(char *txt) {
  str_copy_to(gone_away_messages + location, size, txt);
 }
 
-struct Star {
+typedef struct Star {
  float x;
  float y;
+ float dx;
+ float dy;
  SDL_FRect region;
  SDL_Texture *texture;
-};
+} Star;
 
 #define STAR_MAX 100
 #define STAR_SIZE 16
-struct Stars {
+typedef struct Stars {
  uint32_t count;
- struct Star s[100];
-};
-struct Stars all_star;
+ Star s[STAR_MAX];
+} Stars;
+Stars all_star;
 
 Uint32 spawn_star(void *userdata, SDL_TimerID id, Uint32 interval) {
 
@@ -170,6 +175,9 @@ Uint32 spawn_star(void *userdata, SDL_TimerID id, Uint32 interval) {
 
  all_star.s[all_star.count].x = r;
  all_star.s[all_star.count].y = y;
+
+ all_star.s[all_star.count].dx = -50;
+ all_star.s[all_star.count].dy = 50;
 
  all_star.count++;
 
@@ -244,6 +252,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   return SDL_APP_FAILURE;
  }
 
+ last = ((double)SDL_GetTicks()) / 1000.0;
+
  return SDL_APP_CONTINUE;  
 }
 
@@ -296,7 +306,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  }
  
 
- const double now = ((double)SDL_GetTicks()) / 1000.0;  
+ now = ((double)SDL_GetTicks()) / 1000.0;  
 
  const float red = (float) (0.5 + 0.5 * SDL_sin(now));
 
@@ -304,11 +314,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
  SDL_RenderClear(renderer);
 
+ int w;
+ int h;
+ SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
+
  for (int i = 0; i < all_star.count; i++) {
+
+  if (all_star.s[i].y < h - STAR_SIZE) {
+   all_star.s[i].x += all_star.s[i].dx * (float)(now - last);
+   all_star.s[i].y += all_star.s[i].dy * (float)(now - last);
+  }
+  
   int x = all_star.s[i].x;
   int y = all_star.s[i].y;
 
-
+  
   SDL_FRect dst = {.x = x, .y = y, .w = STAR_SIZE, .h = STAR_SIZE};
 
   SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.8, SDL_ALPHA_OPAQUE_FLOAT); 
@@ -317,12 +337,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
  SDL_SetRenderDrawColorFloat(renderer, 1.0, 1.0, 1.0, SDL_ALPHA_OPAQUE_FLOAT);
  
- int w;
- int h;
- SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
- 
  draw_text(renderer, (w / 2), (h / 2), 0.5f);
  SDL_RenderPresent(renderer);
+
+ last = now;
 
  return SDL_APP_CONTINUE;
 }
