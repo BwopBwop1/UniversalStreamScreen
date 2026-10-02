@@ -139,22 +139,65 @@ void regen_text_buffer(char *txt) {
  str_copy_to(gone_away_messages + location, size, txt);
 }
 
+// I am having trouble just spewing something out that doesn't 
+// take into account every single detail so this is what I am 
+// going with -Bwop
+#define MAX_PARTICLE 10
 typedef struct particle {
  float x, y;
- float dx, dy; 
- float ddx, ddy;
-
- SDL_Color color;
+ float dx, dy;
+ float lifetime;
 } particle;
 
-Uint32 spawn_star(void *userdata, SDL_TimerID id, Uint32 interval) {
+// The head index is so that it will bias 
+// towards looking at old particles first.
+typedef struct particle_system {
+ particle particles[MAX_PARTICLE];
+ size_t count;
+ size_t head;
+ int32_t size;
+} particle_system;
+particle_system ps;
+
+Uint32 spawn_particle(void *userdata, SDL_TimerID id, Uint32 interval) {
+
+ // This will go through and initialize the particles at a given interval.
+ // Bwop
+ if (ps.head >= MAX_PARTICLE - 1) {
+  ps.head = 0;
+  return 0;
+ }
+
+ int w;
+ int h;
+ SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
+
+ int half_w = (w/2);
+
+ int r = SDL_rand(half_w + 1) + (half_w - (ps.size));
+ int y = 0;
+
+ ps.particles[ps.head].x = r;
+ ps.particles[ps.head].y = y;
+
+ ps.particles[ps.head].dx = -50;
+ ps.particles[ps.head].dy = 50;
+
+ ps.particles[ps.head].lifetime = 1.0;
+
+ ps.head++;
+
+ ps.count++;
+ if (ps.count > MAX_PARTICLE - 1) {
+  ps.count = MAX_PARTICLE - 1;
+ }
+
  return interval;
 }
 
 Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval) {
 
  printf("%s : %d\n", center_text_buffer, interval);
-
 
  regen_text_buffer(center_text_buffer);
  dirty = 1;
@@ -209,8 +252,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  
  regen_text_buffer(center_text_buffer);
  generate_text_texture(&texture, center_text_buffer, fg, bg);
-
- SDL_AddTimer(MSToS(1), spawn_star, 0);
+ 
+ ps.size = 16;
+ SDL_AddTimer(MSToS(1), spawn_particle, 0);
  SDL_AddTimer(MSToS(15), change_text, 0);
 
  if (!SDL_SetWindowFullscreen(window, true)) {
@@ -283,6 +327,34 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  int w;
  int h;
  SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
+
+ for (int i = 0; i < ps.count; i++) {
+
+  if (ps.particles[i].y < h - ps.size) {
+   ps.particles[i].x += ps.particles[i].dx * (float)(now - last);
+   ps.particles[i].y += ps.particles[i].dy * (float)(now - last);
+  } else {
+   int half_w = (w/2);
+
+   int r = SDL_rand(half_w + 1) + (half_w - (ps.size));
+   int y = 0;
+
+   ps.particles[i].x = r;
+   ps.particles[i].y = y;
+
+   ps.particles[i].dx = -50;
+   ps.particles[i].dy = 50;
+  }
+  
+  int x = ps.particles[i].x;
+  int y = ps.particles[i].y;
+
+  
+  SDL_FRect dst = {.x = x, .y = y, .w = ps.size, .h = ps.size};
+
+  SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.8, SDL_ALPHA_OPAQUE_FLOAT); 
+  SDL_RenderRect(renderer, &dst);
+ }
 
  SDL_SetRenderDrawColorFloat(renderer, 1.0, 1.0, 1.0, SDL_ALPHA_OPAQUE_FLOAT);
  
