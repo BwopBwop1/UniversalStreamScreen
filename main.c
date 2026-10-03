@@ -160,36 +160,39 @@ typedef struct particle_system {
 particle_system ps;
 
 Uint32 spawn_particle(void *userdata, SDL_TimerID id, Uint32 interval) {
-
+ 
+ particle_system *par_sar = (particle_system *)userdata;
  // This will go through and initialize the particles at a given interval.
  // Bwop
- if (ps.head >= MAX_PARTICLE - 1) {
-  ps.head = 0;
-  return 0;
- }
+ int try_spawn = 1;
+ while (try_spawn) {
+  if (par_sar->head > MAX_PARTICLE - 1) {
+    par_sar->head = 0;
+    try_spawn = 0;
+    return interval;
+  }
 
- int w;
- int h;
- SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
+  if (par_sar->particles[par_sar->head].lifetime <= 0.0) {
+    int w;
+    int h;
+    SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
 
- int half_w = (w/2);
+    int half_w = (w/2);
 
- int r = SDL_rand(half_w + 1) + (half_w - (ps.size));
- int y = 0;
+    int r = SDL_rand(half_w + 1) + (half_w - (par_sar->size));
+    int y = 0;
 
- ps.particles[ps.head].x = r;
- ps.particles[ps.head].y = y;
+    par_sar->particles[par_sar->head].x = r;
+    par_sar->particles[par_sar->head].y = y;
 
- ps.particles[ps.head].dx = -50;
- ps.particles[ps.head].dy = 50;
+    par_sar->particles[par_sar->head].dx = -50;
+    par_sar->particles[par_sar->head].dy = 50;
 
- ps.particles[ps.head].lifetime = 1.0;
+    par_sar->particles[par_sar->head].lifetime = 1.0;
+    try_spawn = 0;
+  }
 
- ps.head++;
-
- ps.count++;
- if (ps.count > MAX_PARTICLE - 1) {
-  ps.count = MAX_PARTICLE - 1;
+  par_sar->head++;
  }
 
  return interval;
@@ -248,13 +251,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
  SDL_Color bg = {255, 255, 255, 0};
  
+ // TODO: Really need an allocator or something.
  center_text_buffer = malloc(center_text_len);
  
  regen_text_buffer(center_text_buffer);
  generate_text_texture(&texture, center_text_buffer, fg, bg);
- 
+
  ps.size = 16;
- SDL_AddTimer(MSToS(1), spawn_particle, 0);
+ SDL_AddTimer(MSToS(1), spawn_particle, &ps);
  SDL_AddTimer(MSToS(15), change_text, 0);
 
  if (!SDL_SetWindowFullscreen(window, true)) {
@@ -328,32 +332,25 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  int h;
  SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
 
- for (int i = 0; i < ps.count; i++) {
+ for (int i = 0; i < MAX_PARTICLE; i++) {
+  if (ps.particles[i].lifetime > 0.0) {
+    if (ps.particles[i].y < h - ps.size) {
+     ps.particles[i].x += ps.particles[i].dx * (float)(now - last);
+     ps.particles[i].y += ps.particles[i].dy * (float)(now - last);
+    } else {
+     ps.particles[i].lifetime = 0.0;
+    }
+    
+    int x = ps.particles[i].x;
+    int y = ps.particles[i].y;
 
-  if (ps.particles[i].y < h - ps.size) {
-   ps.particles[i].x += ps.particles[i].dx * (float)(now - last);
-   ps.particles[i].y += ps.particles[i].dy * (float)(now - last);
-  } else {
-   int half_w = (w/2);
+    
+    SDL_FRect dst = {.x = x, .y = y, .w = ps.size, .h = ps.size};
 
-   int r = SDL_rand(half_w + 1) + (half_w - (ps.size));
-   int y = 0;
+    SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.8, SDL_ALPHA_OPAQUE_FLOAT); 
+    SDL_RenderRect(renderer, &dst);
 
-   ps.particles[i].x = r;
-   ps.particles[i].y = y;
-
-   ps.particles[i].dx = -50;
-   ps.particles[i].dy = 50;
-  }
-  
-  int x = ps.particles[i].x;
-  int y = ps.particles[i].y;
-
-  
-  SDL_FRect dst = {.x = x, .y = y, .w = ps.size, .h = ps.size};
-
-  SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.8, SDL_ALPHA_OPAQUE_FLOAT); 
-  SDL_RenderRect(renderer, &dst);
+    }
  }
 
  SDL_SetRenderDrawColorFloat(renderer, 1.0, 1.0, 1.0, SDL_ALPHA_OPAQUE_FLOAT);
@@ -367,15 +364,16 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
+ // TODO: Actual Object handling.
+ free(gone_away_messages);
+ free(center_text_buffer);
 
-  free(gone_away_messages);
-  free(center_text_buffer);
+ SDL_DestroyTexture(texture);
 
-  SDL_DestroyTexture(texture);
+ if (font) {
+  TTF_CloseFont(font);
+ }
+ TTF_Quit();
 
-  if (font) {
-   TTF_CloseFont(font);
-  }
-  TTF_Quit();
 }
 
