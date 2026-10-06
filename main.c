@@ -16,7 +16,6 @@
 #include <sys/mman.h>
 
 #define SDL_MAIN_USE_CALLBACKS 1
-#define SDL_HINT_RENDER_VSYNC "SDL_RENDER_VSYNC"
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_stdinc.h"
 #include "SDL3/SDL_main.h"
@@ -39,10 +38,12 @@ SDL_Window *window = 0;
 SDL_Renderer *renderer = 0;
 TTF_Font *font = 0;
 
-double now = 0;
-double last = 0;
+double nowMS = 0;
+double lastMS = 0;
 
 int32_t dirty = 0;
+float refreshRatePerSecond = 60;
+float targetMS = 0;
 
 #define Kilobytes(number) ((number) * 1024ull)
 #define Megabytes(number) (Kilobytes(number) * 1024ull)
@@ -233,7 +234,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  arena.size = Megabytes(2);
  arena.memory = malloc(arena.size);
- 
+
+
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -297,7 +299,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   return SDL_APP_FAILURE;
  }
 
- last = ((double)SDL_GetTicks()) / 1000.0;
+ lastMS = (SDL_GetTicks());
+
+ int displayID = SDL_GetPrimaryDisplay();
+ const SDL_DisplayMode *displayMode = SDL_GetCurrentDisplayMode(displayID);
+ refreshRatePerSecond = displayMode->refresh_rate;
+ targetMS = 1000.0 / refreshRatePerSecond;
+
+ if(!SDL_SetRenderVSync(renderer, 1)) {
+  SDL_Log("Couldn't make renderer vsync: %s", SDL_GetError());
+  return SDL_APP_FAILURE;
+ }
 
  return SDL_APP_CONTINUE;  
 }
@@ -333,8 +345,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
- now = ((double)SDL_GetTicks()) / 1000.0;  
- float time_step = (float)(now - last);
+ nowMS = SDL_GetTicks();
+ float time_step = (float)(nowMS - lastMS) / 1000.0; // Seconds
 
  if (dirty) {
   SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
@@ -359,9 +371,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   SDL_SetTextureAlphaMod(a_Texture, (Uint8)new_texture_mod);
 
  }
-
-
- const float red = (float) (0.5 + 0.5 * SDL_sin(now));
 
  SDL_SetRenderDrawColorFloat(renderer, 0.0, 0.0, 0.0, SDL_ALPHA_OPAQUE_FLOAT); 
 
@@ -397,7 +406,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  draw_text(renderer, (w / 2), (h / 2), 0.5f, a_Texture);
  SDL_RenderPresent(renderer);
 
- last = now;
+ float stepMS = (float)(nowMS - lastMS);
+ if (stepMS < targetMS) {
+  SDL_Delay((targetMS - stepMS));
+ }
+ lastMS = nowMS;
 
  return SDL_APP_CONTINUE;
 }
