@@ -4,7 +4,7 @@
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 stb` -lm
 //
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
-
+// gcc --debug  -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +16,7 @@
 #include <sys/mman.h>
 
 #define SDL_MAIN_USE_CALLBACKS 1
+#define SDL_HINT_RENDER_VSYNC "SDL_RENDER_VSYNC"
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_stdinc.h"
 #include "SDL3/SDL_main.h"
@@ -26,24 +27,38 @@
 
 #include <SDL3_ttf/SDL_ttf.h>
 
-uint8_t *center_text_buffer = 0;
-int32_t center_text_len = 4096;
-
-int32_t dirty = 0;
 #define MSToS(value) (value * 1000)
 
 const char *font_path = ("assets/fonts/font.ttf");
 const char *gone_away_path = ("assets/txts/gone_away_messages.txt");
 
-void *gone_away_messages = 0;
+void **messages = 0;
+int32_t total_messages = 0;
 
 SDL_Window *window = 0;
 SDL_Renderer *renderer = 0;
-SDL_Texture *texture = 0;
 TTF_Font *font = 0;
 
 double now = 0;
 double last = 0;
+
+int32_t dirty = 0;
+
+#define Kilobytes(number) ((number) * 1024ull)
+#define Megabytes(number) (Kilobytes(number) * 1024ull)
+#define Gigabytes(number) (Megabytes(number) * 1024ull)
+
+typedef struct memoryArena {
+ uint32_t size;
+ uint32_t used;
+
+ void *memory;
+} memoryArena;
+memoryArena arena;
+
+// Two textures to swap what text is drawn for fade in/out.
+SDL_Texture *a_Texture = 0;
+SDL_Texture *b_Texture = 0;
 
 void str_zero(char *b1) {
  for (char *c = b1; *c; c++) { 
@@ -56,7 +71,7 @@ void str_copy_to(char *b1, int amount, char *b2) {
  char *dst = b2;
 
  for (int i = 0; i < amount; i++) {
-    *dst++ = *src++;
+  *dst++ = *src++;
  }
 }
 
@@ -70,7 +85,7 @@ char * str_copy_inplace(const char *b1, int amount, char *b2) {
  return dst;
 }
 
-void str_total(char *file, char delimiter, int *total) {
+void str_total(uint8_t *file, uint8_t delimiter, uint32_t *total) {
  int t = 0;
  for (char *c = file; *c; c++) { 
   char current_char = *c;
@@ -125,18 +140,16 @@ void generate_text_texture(SDL_Texture **tex, char *txt, SDL_Color fg, SDL_Color
  *tex = temp;
 }
 
+void draw_text(SDL_Renderer *renderer, float x, float y, float scale, SDL_Texture *tex) {
+ if (!tex) {
+  return;
+ }
 
-// TODO: function could be converted to be more universal.
-void regen_text_buffer(char *txt) {
- int total = 0;
- str_total(gone_away_messages, '\n', &total);
- int r = SDL_rand(total);
+ float width = tex->w * scale;
+ float height = tex->h * scale;
 
- int location = 0;
- int size = 0;
- str_cut(gone_away_messages, r, &location, &size, '\n');
- str_zero(txt);
- str_copy_to(gone_away_messages + location, size, txt);
+ SDL_FRect dst = {.x = (x) - (width / 2), .y = (y) - (height / 2), .w = width, .h = height};
+ SDL_RenderTexture(renderer, tex, NULL, &dst);
 }
 
 // I am having trouble just spewing something out that doesn't 
@@ -200,35 +213,31 @@ Uint32 spawn_particle(void *userdata, SDL_TimerID id, Uint32 interval) {
 
 Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval) {
 
- printf("%s : %d\n", center_text_buffer, interval);
-
- regen_text_buffer(center_text_buffer);
  dirty = 1;
 
  return interval;
 }
 
+
+void *pushSize(memoryArena *arena, size_t size) {
+ uint8_t *result = 0;
+ if (arena->used + size < arena->size) {
+  result = (uint8_t *)arena->memory + arena->used;
+
+  arena->used += size;
+ }
+ return (void *)(result);
+}
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
+
+ arena.size = Megabytes(2);
+ arena.memory = malloc(arena.size);
+ 
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
   return SDL_APP_FAILURE;
  }
-
- SDL_IOStream *gone_away_file = SDL_IOFromFile(gone_away_path, "r");
- if (!gone_away_file) {
-  SDL_Log("Couldn't read gone_away_file %s\n", SDL_GetError());
-  return SDL_APP_FAILURE;
- }
- 
- int file_size = SDL_GetIOSize(gone_away_file);
- gone_away_messages = malloc(file_size);
- SDL_ReadIO(gone_away_file, gone_away_messages, file_size);
- if (!gone_away_messages) {
-  SDL_Log("Couldn't load gone_away_file into memory %s\n", SDL_GetError());
-  return SDL_APP_FAILURE;
- }
-
- SDL_CloseIO(gone_away_file);
 
  if (!SDL_CreateWindowAndRenderer("Test Application", 
 			 0, 0, 
@@ -248,18 +257,40 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   return SDL_APP_FAILURE;
  }
 
- SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
- SDL_Color bg = {255, 255, 255, 0};
+
+ SDL_IOStream *gone_away_file = SDL_IOFromFile(gone_away_path, "r");
+
+ int file_size = SDL_GetIOSize(gone_away_file);
+ void * gone_away_messages = pushSize(&arena, file_size);
+ SDL_ReadIO(gone_away_file, gone_away_messages, file_size);
+
+ if (!gone_away_file) {
+  SDL_Log("Couldn't read gone_away_file %s\n", SDL_GetError());
+  return SDL_APP_FAILURE;
+ }
+
+ SDL_CloseIO(gone_away_file);
+
+ if (!gone_away_messages) {
+  SDL_Log("Couldn't load gone_away_file into memory %s\n", SDL_GetError());
+  return SDL_APP_FAILURE;
+ }
  
- // TODO: Really need an allocator or something.
- center_text_buffer = malloc(center_text_len);
- 
- regen_text_buffer(center_text_buffer);
- generate_text_texture(&texture, center_text_buffer, fg, bg);
+ str_total(gone_away_messages, '\n', &total_messages);
+ messages = (void **)pushSize(&arena, sizeof(void *) * total_messages);
+
+ for (int i = 0; i < total_messages; i++) {
+  int location = 0;
+  int size = 0;
+  str_cut(gone_away_messages, i, &location, &size, '\n');
+  messages[i] = pushSize(&arena, size + 1);
+  str_copy_to((char *)(gone_away_messages + location), size, messages[i]);
+ }
 
  ps.size = 16;
  SDL_AddTimer(MSToS(1), spawn_particle, &ps);
  SDL_AddTimer(MSToS(15), change_text, 0);
+ dirty = 1;
 
  if (!SDL_SetWindowFullscreen(window, true)) {
   SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
@@ -287,8 +318,6 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     SDL_Color fg = {r, g, b, SDL_ALPHA_OPAQUE};
     SDL_Color bg = {255, 255, 255, 0};
 
-    regen_text_buffer(center_text_buffer);
-    generate_text_texture(&texture, center_text_buffer, fg, bg);
    }
   } break;
   case SDL_EVENT_QUIT: {
@@ -302,25 +331,35 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  return SDL_APP_CONTINUE;
 }
 
-void draw_text(SDL_Renderer *renderer, float x, float y, float scale) {
- float width = texture->w * scale;
- float height = texture->h * scale;
-
- SDL_FRect dst = {.x = (x) - (width / 2), .y = (y) - (height / 2), .w = width, .h = height};
- SDL_RenderTexture(renderer, texture, NULL, &dst);
-
-}
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
+ now = ((double)SDL_GetTicks()) / 1000.0;  
+ float time_step = (float)(now - last);
+
  if (dirty) {
   SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
   SDL_Color bg = {255, 255, 255, 0};
+  
+  int r = SDL_rand(total_messages + 1);
+  generate_text_texture(&a_Texture, messages[r], fg, bg);
 
-  generate_text_texture(&texture, center_text_buffer, fg, bg);
+  dirty = 0;
+
  }
- 
 
- now = ((double)SDL_GetTicks()) / 1000.0;  
+ {
+  Uint8 texture_mod;
+  SDL_GetTextureAlphaMod(a_Texture, &texture_mod);
+  
+  int32_t new_texture_mod = texture_mod - (10) * time_step;
+  if (new_texture_mod < 0) {
+   new_texture_mod = 0;
+  }
+
+  SDL_SetTextureAlphaMod(a_Texture, (Uint8)new_texture_mod);
+
+ }
+
 
  const float red = (float) (0.5 + 0.5 * SDL_sin(now));
 
@@ -335,8 +374,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  for (int i = 0; i < MAX_PARTICLE; i++) {
   if (ps.particles[i].lifetime > 0.0) {
     if (ps.particles[i].y < h - ps.size) {
-     ps.particles[i].x += ps.particles[i].dx * (float)(now - last);
-     ps.particles[i].y += ps.particles[i].dy * (float)(now - last);
+     ps.particles[i].x += ps.particles[i].dx * time_step;
+     ps.particles[i].y += ps.particles[i].dy * time_step;
     } else {
      ps.particles[i].lifetime = 0.0;
     }
@@ -355,7 +394,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
  SDL_SetRenderDrawColorFloat(renderer, 1.0, 1.0, 1.0, SDL_ALPHA_OPAQUE_FLOAT);
  
- draw_text(renderer, (w / 2), (h / 2), 0.5f);
+ draw_text(renderer, (w / 2), (h / 2), 0.5f, a_Texture);
  SDL_RenderPresent(renderer);
 
  last = now;
@@ -365,10 +404,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
  // TODO: Actual Object handling.
- free(gone_away_messages);
- free(center_text_buffer);
+ free(arena.memory);
 
- SDL_DestroyTexture(texture);
+ SDL_DestroyTexture(a_Texture);
 
  if (font) {
   TTF_CloseFont(font);
