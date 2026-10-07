@@ -5,6 +5,8 @@
 //
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
 // gcc --debug  -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
+
+// SDL has a standard library
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,8 +17,11 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
+#include <X11/Xlib.h>
+
 #define SDL_MAIN_USE_CALLBACKS 1
 #include "SDL3/SDL.h"
+#include "SDL3/SDL_thread.h"
 #include "SDL3/SDL_stdinc.h"
 #include "SDL3/SDL_main.h"
 #include "SDL3/SDL_surface.h"
@@ -61,6 +66,36 @@ memoryArena arena;
 // Two textures to swap what text is drawn for fade in/out.
 SDL_Texture *a_Texture = 0;
 SDL_Texture *b_Texture = 0;
+
+SDL_Thread *keyboard_listener = 0;
+SDL_AtomicInt Listenerrunning = {};
+
+int x11_keyboard_listener(void *data) {
+
+ double _lastMS = (SDL_GetTicks());
+ double _nowMS = 0;
+
+ int running = SDL_GetAtomicInt(&Listenerrunning);
+
+ Display *display = (Display *)data;
+ Window root = DefaultRootWindow(display);
+ while (running) {
+
+  _nowMS = (SDL_GetTicks());
+
+  float stepMS = (float)(nowMS - lastMS);
+  if (stepMS < targetMS) {
+   SDL_Delay((targetMS - stepMS));
+  }
+  _lastMS = _nowMS;
+
+  running = SDL_GetAtomicInt(&Listenerrunning);
+ }
+
+ printf("Hello from another thread\n");
+
+ return SDL_THREAD_COMPLETE;
+}
 
 int str_length(char *b1) {
  int result = 0;
@@ -339,12 +374,23 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   return SDL_APP_FAILURE;
  }
 
+ // For linux, having a seperate process with elevated permissions to listen
+ // to /dev/input/ and then communitcate back over socket might be perferable 
+ // as the implementation no longer cares about being on x11 or wayland.
+ //
+ // It would also allow the application to explictly ask the user for permission which
+ // is always nice and wanted.
  const char *platform = SDL_GetPlatform();
  const char *video_driver = SDL_GetCurrentVideoDriver();
  if (str_compare((char *)platform, "Linux")) {
   if (str_compare((char *)video_driver, "x11")) {
-   printf("Global input for %s hasn't been implemented\n", video_driver);
-   printf("However this is a platform with known global input support\n");
+   SDL_PropertiesID props = SDL_GetWindowProperties(window);
+   Display *display = (Display *)SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, 0);
+   
+   SDL_SetAtomicInt(&Listenerrunning, 1);
+   keyboard_listener = SDL_CreateThread(x11_keyboard_listener, "x11_keyboard_listener", display);
+
+   printf("Connected to root window for x11");
   } else {
    printf("Global input for %s hasn't been implemented\n", video_driver);
   }
@@ -457,6 +503,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
  // TODO: Actual Object handling.
  free(arena.memory);
+
+ SDL_SetAtomicInt(&Listenerrunning, 0);
+ int status = 0;
+ SDL_WaitThread(keyboard_listener, &status);
 
  SDL_DestroyTexture(a_Texture);
 
