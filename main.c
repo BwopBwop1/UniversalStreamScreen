@@ -26,7 +26,8 @@
 
 #include <SDL3_ttf/SDL_ttf.h>
 
-#define MSToS(value) (value * 1000)
+#define SToMS(value) (value * 1000)
+#define MSToNS(value) (value * 1000000)
 
 const char *font_path = ("assets/fonts/font.ttf");
 const char *gone_away_path = ("assets/txts/gone_away_messages.txt");
@@ -61,10 +62,37 @@ memoryArena arena;
 SDL_Texture *a_Texture = 0;
 SDL_Texture *b_Texture = 0;
 
+int str_length(char *b1) {
+ int result = 0;
+ for (const char *c = b1; *c; c++) {
+  result++;
+ }
+ return result;
+}
+
 void str_zero(char *b1) {
  for (char *c = b1; *c; c++) { 
   *c = 0;
  }
+}
+
+bool str_compare(char *b1, char *b2) {
+
+ if (str_length(b1) != str_length(b2)) {
+  return false;
+ }
+
+ for (char *c = b1; *c; c++) {
+  char *b = b2++;
+
+  if (*b == *c) {
+   continue;
+  }
+
+  return false;
+ }
+
+ return true;
 }
 
 void str_copy_to(char *b1, int amount, char *b2) {
@@ -290,8 +318,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  }
 
  ps.size = 16;
- SDL_AddTimer(MSToS(1), spawn_particle, &ps);
- SDL_AddTimer(MSToS(15), change_text, 0);
+ SDL_AddTimer(SToMS(1), spawn_particle, &ps);
+ SDL_AddTimer(SToMS(15), change_text, 0);
  dirty = 1;
 
  if (!SDL_SetWindowFullscreen(window, true)) {
@@ -309,6 +337,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  if(!SDL_SetRenderVSync(renderer, 1)) {
   SDL_Log("Couldn't make renderer vsync: %s", SDL_GetError());
   return SDL_APP_FAILURE;
+ }
+
+ const char *platform = SDL_GetPlatform();
+ const char *video_driver = SDL_GetCurrentVideoDriver();
+ if (str_compare((char *)platform, "Linux")) {
+  if (str_compare((char *)video_driver, "x11")) {
+   printf("Global input for %s hasn't been implemented\n", video_driver);
+   printf("However this is a platform with known global input support\n");
+  } else {
+   printf("Global input for %s hasn't been implemented\n", video_driver);
+  }
  }
 
  return SDL_APP_CONTINUE;  
