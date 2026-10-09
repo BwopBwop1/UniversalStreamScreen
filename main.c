@@ -4,7 +4,7 @@
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 stb` -lm
 //
 // gcc -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
-// gcc --debug  -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf x11` -lm
+// gcc --debug  -o Test.out main.c `pkg-config --cflags --libs sdl3 sdl3-ttf` -lm
 
 // SDL has a standard library
 #include <stdio.h>
@@ -12,13 +12,13 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-
-#include <X11/Xlib.h>
-#include <X11/XKBlib.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include "SDL3/SDL.h"
@@ -268,6 +268,24 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  arena.size = Megabytes(2);
  arena.memory = malloc(arena.size);
+
+ const char *path = "/run/user/1000/keyboardListener";
+
+ struct sockaddr_un sockaddr = { .sun_family = AF_UNIX };
+ strcpy(sockaddr.sun_path, path);
+
+ int socket_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+ if (socket_fd == -1) {
+  printf("Unable to open socket\n");
+  return SDL_APP_FAILURE;
+ }
+
+ int connect_result = connect(socket_fd, (struct sockaddr *)&sockaddr, offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1);
+ if (connect_result == -1) {
+  printf("Unable to connect to socket\n");
+  printf("errno value %s\n", strerror(errno));
+  return SDL_APP_FAILURE;
+ }
 
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
