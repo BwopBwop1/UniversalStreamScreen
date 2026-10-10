@@ -163,7 +163,6 @@ void str_cut(char *file, int idx, int *location, int *size, char delimiter) {
 
 void generate_text_texture(SDL_Texture **tex, char *txt, SDL_Color fg, SDL_Color bg) {
  SDL_Texture *temp = 0;
-
  SDL_Surface *text = TTF_RenderText_Shaded(font, txt, 0, fg, bg);
  if (text) {
   temp = SDL_CreateTextureFromSurface(renderer, text);
@@ -264,11 +263,13 @@ void *pushSize(memoryArena *arena, size_t size) {
  return (void *)(result);
 }
 
+#define LISTEN 0
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  arena.size = Megabytes(2);
  arena.memory = malloc(arena.size);
 
+ #if LISTEN
  const char *path = "/run/user/1000/keyboardListener";
 
  struct sockaddr_un sockaddr = { .sun_family = AF_UNIX };
@@ -286,7 +287,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   printf("errno value %s\n", strerror(errno));
   return SDL_APP_FAILURE;
  }
-
+ #endif
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -398,7 +399,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
   SDL_Color bg = {255, 255, 255, 0};
   
-  int r = SDL_rand(total_messages + 1);
+  int r = SDL_rand(total_messages);
   generate_text_texture(&a_Texture, messages[r], fg, bg);
 
   dirty = 0;
