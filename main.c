@@ -32,8 +32,69 @@
 
 #include <SDL3_ttf/SDL_ttf.h>
 
+#define MAX_READ_EVENTS 64
+
 #define SToMS(value) (value * 1000)
 #define MSToNS(value) (value * 1000000)
+
+#define Kilobytes(number) ((number) * 1024ull)
+#define Megabytes(number) (Kilobytes(number) * 1024ull)
+#define Gigabytes(number) (Megabytes(number) * 1024ull)
+
+typedef struct event {
+ int32_t type;
+ int32_t scancode;
+ uint16_t modstate;
+} event;
+
+typedef struct memoryArena {
+ uint32_t size;
+ uint32_t used;
+
+ void *memory;
+} memoryArena;
+
+#define MAX_PARTICLE 10
+typedef struct particle {
+ float x, y;
+ float dx, dy;
+ float lifetime;
+} particle;
+
+// The head index is so that it will bias 
+// towards looking at old particles first.
+typedef struct particle_system {
+ particle particles[MAX_PARTICLE];
+ size_t count;
+ size_t head;
+ int32_t size;
+} particle_system;
+
+int32_t connect_to_listener(int32_t *fd);
+int32_t check_and_get_event(int32_t fd);
+
+void str_zero(uint8_t *b1);
+int32_t str_length(uint8_t *b1);
+bool str_compare(uint8_t *b1, uint8_t *b2);
+void str_copy_to(uint8_t *b1, uint32_t amount, uint8_t *b2);
+uint8_t * str_copy_inplace(const uint8_t *b1, uint32_t amount, uint8_t *b2);
+void str_total(uint8_t *file, uint8_t delimiter, uint32_t *total);
+void str_cut(uint8_t *file, int32_t idx, int32_t *location, int32_t *size, uint8_t delimiter);
+
+void generate_text_texture(SDL_Texture **tex, uint8_t *txt, SDL_Color fg, SDL_Color bg);
+void draw_text(SDL_Renderer *renderer, float x, float y, float scale, SDL_Texture *tex);
+
+Uint32 spawn_particle(void *userdata, SDL_TimerID id, Uint32 interval);
+Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval);
+
+void *pushSize(memoryArena *arena, size_t size);
+
+particle_system ps;
+memoryArena arena;
+
+// Two textures to swap what text is drawn for fade in/out.
+SDL_Texture *a_Texture = 0;
+SDL_Texture *b_Texture = 0;
 
 const char *font_path = ("assets/fonts/font.ttf");
 const char *gone_away_path = ("assets/txts/gone_away_messages.txt");
@@ -52,242 +113,15 @@ int32_t dirty = 0;
 float refreshRatePerSecond = 60;
 float targetMS = 0;
 
-#define Kilobytes(number) ((number) * 1024ull)
-#define Megabytes(number) (Kilobytes(number) * 1024ull)
-#define Gigabytes(number) (Megabytes(number) * 1024ull)
+int32_t file_descriptor = 0;
 
-typedef struct memoryArena {
- uint32_t size;
- uint32_t used;
-
- void *memory;
-} memoryArena;
-memoryArena arena;
-
-// Two textures to swap what text is drawn for fade in/out.
-SDL_Texture *a_Texture = 0;
-SDL_Texture *b_Texture = 0;
-
-int str_length(char *b1) {
- int result = 0;
- for (const char *c = b1; *c; c++) {
-  result++;
- }
- return result;
-}
-
-void str_zero(char *b1) {
- for (char *c = b1; *c; c++) { 
-  *c = 0;
- }
-}
-
-bool str_compare(char *b1, char *b2) {
-
- if (str_length(b1) != str_length(b2)) {
-  return false;
- }
-
- for (char *c = b1; *c; c++) {
-  char *b = b2++;
-
-  if (*b == *c) {
-   continue;
-  }
-
-  return false;
- }
-
- return true;
-}
-
-void str_copy_to(char *b1, int amount, char *b2) {
- char *src = b1;
- char *dst = b2;
-
- for (int i = 0; i < amount; i++) {
-  *dst++ = *src++;
- }
-}
-
-char * str_copy_inplace(const char *b1, int amount, char *b2) {
- const char *src = b1;
- char *dst = b2;
-
- for (int i = 0; i < amount; i++) {
-    *dst++ = *src++;
- }
- return dst;
-}
-
-void str_total(uint8_t *file, uint8_t delimiter, uint32_t *total) {
- int t = 0;
- for (char *c = file; *c; c++) { 
-  char current_char = *c;
-  
-  if (current_char == delimiter) {
-   t++;
-  }
- }
- 
-  *total = t;
-}
-
-void str_cut(char *file, int idx, int *location, int *size, char delimiter) {
- int loc = 0;
- int s = 0;
-
- int index = 0;
- int i = 0;
-
- for (char *c = file; *c; c++) { 
-  char current_char = *c;
-  
-  if (current_char == delimiter) {
-    s = i - loc;
-
-   if (index == idx) {
-    break;
-   } 
-
-   loc = i + 1;
-   index++;
-  }
-  
-  i++;
- }
-
- *location = loc;
- *size = s;
-}
-
-void generate_text_texture(SDL_Texture **tex, char *txt, SDL_Color fg, SDL_Color bg) {
- SDL_Texture *temp = 0;
- SDL_Surface *text = TTF_RenderText_Shaded(font, txt, 0, fg, bg);
- if (text) {
-  temp = SDL_CreateTextureFromSurface(renderer, text);
-  SDL_DestroySurface(text);
- }
- if (!temp) {
-  SDL_Log("Couldn't create text: %s\n", SDL_GetError());
- }
- *tex = temp;
-}
-
-void draw_text(SDL_Renderer *renderer, float x, float y, float scale, SDL_Texture *tex) {
- if (!tex) {
-  return;
- }
-
- float width = tex->w * scale;
- float height = tex->h * scale;
-
- SDL_FRect dst = {.x = (x) - (width / 2), .y = (y) - (height / 2), .w = width, .h = height};
- SDL_RenderTexture(renderer, tex, NULL, &dst);
-}
-
-// I am having trouble just spewing something out that doesn't 
-// take into account every single detail so this is what I am 
-// going with -Bwop
-#define MAX_PARTICLE 10
-typedef struct particle {
- float x, y;
- float dx, dy;
- float lifetime;
-} particle;
-
-// The head index is so that it will bias 
-// towards looking at old particles first.
-typedef struct particle_system {
- particle particles[MAX_PARTICLE];
- size_t count;
- size_t head;
- int32_t size;
-} particle_system;
-particle_system ps;
-
-Uint32 spawn_particle(void *userdata, SDL_TimerID id, Uint32 interval) {
- 
- particle_system *par_sar = (particle_system *)userdata;
- // This will go through and initialize the particles at a given interval.
- // Bwop
- int try_spawn = 1;
- while (try_spawn) {
-  if (par_sar->head > MAX_PARTICLE - 1) {
-    par_sar->head = 0;
-    try_spawn = 0;
-    return interval;
-  }
-
-  if (par_sar->particles[par_sar->head].lifetime <= 0.0) {
-    int w;
-    int h;
-    SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
-
-    int half_w = (w/2);
-
-    int r = SDL_rand(half_w + 1) + (half_w - (par_sar->size));
-    int y = 0;
-
-    par_sar->particles[par_sar->head].x = r;
-    par_sar->particles[par_sar->head].y = y;
-
-    par_sar->particles[par_sar->head].dx = -50;
-    par_sar->particles[par_sar->head].dy = 50;
-
-    par_sar->particles[par_sar->head].lifetime = 1.0;
-    try_spawn = 0;
-  }
-
-  par_sar->head++;
- }
-
- return interval;
-}
-
-Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval) {
-
- dirty = 1;
-
- return interval;
-}
-
-
-void *pushSize(memoryArena *arena, size_t size) {
- uint8_t *result = 0;
- if (arena->used + size < arena->size) {
-  result = (uint8_t *)arena->memory + arena->used;
-
-  arena->used += size;
- }
- return (void *)(result);
-}
-
-#define LISTEN 0
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  arena.size = Megabytes(2);
  arena.memory = malloc(arena.size);
 
- #if LISTEN
- const char *path = "/run/user/1000/keyboardListener";
+ connect_to_listener(&file_descriptor);
 
- struct sockaddr_un sockaddr = { .sun_family = AF_UNIX };
- strcpy(sockaddr.sun_path, path);
-
- int socket_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
- if (socket_fd == -1) {
-  printf("Unable to open socket\n");
-  return SDL_APP_FAILURE;
- }
-
- int connect_result = connect(socket_fd, (struct sockaddr *)&sockaddr, offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1);
- if (connect_result == -1) {
-  printf("Unable to connect to socket\n");
-  printf("errno value %s\n", strerror(errno));
-  return SDL_APP_FAILURE;
- }
- #endif
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -390,10 +224,15 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  return SDL_APP_CONTINUE;
 }
 
-
 SDL_AppResult SDL_AppIterate(void *appstate) {
  nowMS = SDL_GetTicks();
  float time_step = (float)(nowMS - lastMS) / 1000.0; // Seconds
+
+ if (check_and_get_event(file_descriptor)) {
+
+ } else {
+  // TODO: Try and recoonect.
+ }
 
  if (dirty) {
   SDL_Color fg = {255, 255, 255, SDL_ALPHA_OPAQUE};
@@ -475,3 +314,254 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
 
 }
 
+int32_t str_length(uint8_t *b1) {
+ int32_t result = 0;
+ for (const uint8_t *c = b1; *c; c++) {
+  result++;
+ }
+ return result;
+}
+
+void str_zero(uint8_t *b1) {
+ for (uint8_t *c = b1; *c; c++) { 
+  *c = 0;
+ }
+}
+
+bool str_compare(uint8_t *b1, uint8_t *b2) {
+
+ if (str_length(b1) != str_length(b2)) {
+  return false;
+ }
+
+ for (uint8_t *c = b1; *c; c++) {
+  uint8_t *b = b2++;
+
+  if (*b == *c) {
+   continue;
+  }
+
+  return false;
+ }
+
+ return true;
+}
+
+void str_copy_to(uint8_t *b1, uint32_t amount, uint8_t *b2) {
+ uint8_t *src = b1;
+ uint8_t *dst = b2;
+
+ for (uint32_t i = 0; i < amount; i++) {
+  *dst++ = *src++;
+ }
+}
+
+uint8_t * str_copy_inplace(const uint8_t *b1, uint32_t amount, uint8_t *b2) {
+ const char *src = b1;
+ char *dst = b2;
+
+ for (int i = 0; i < amount; i++) {
+    *dst++ = *src++;
+ }
+ return dst;
+}
+
+void str_total(uint8_t *file, uint8_t delimiter, uint32_t *total) {
+ int32_t t = 0;
+ for (uint8_t *c = file; *c; c++) { 
+  uint8_t current_char = *c;
+  
+  if (current_char == delimiter) {
+   t++;
+  }
+ }
+ 
+  *total = t;
+}
+
+void str_cut(uint8_t *file, int32_t idx, int32_t *location, int32_t *size, uint8_t delimiter) {
+ int32_t loc = 0;
+ int32_t s = 0;
+
+ int32_t index = 0;
+ int32_t i = 0;
+
+ for (uint8_t *c = file; *c; c++) { 
+  uint8_t current_char = *c;
+  
+  if (current_char == delimiter) {
+    s = i - loc;
+
+   if (index == idx) {
+    break;
+   } 
+
+   loc = i + 1;
+   index++;
+  }
+  
+  i++;
+ }
+
+ *location = loc;
+ *size = s;
+}
+
+void generate_text_texture(SDL_Texture **tex, uint8_t *txt, SDL_Color fg, SDL_Color bg) {
+
+ SDL_Texture *temp = 0;
+ // NOTE: This can fail when txt is a null ptr eventually we might want a string type.
+ SDL_Surface *text = TTF_RenderText_Shaded(font, txt, 0, fg, bg);
+ if (text) {
+  temp = SDL_CreateTextureFromSurface(renderer, text);
+  SDL_DestroySurface(text);
+ }
+ if (!temp) {
+  SDL_Log("Couldn't create text: %s\n", SDL_GetError());
+ }
+ *tex = temp;
+}
+
+void draw_text(SDL_Renderer *renderer, float x, float y, float scale, SDL_Texture *tex) {
+ if (!tex) {
+  return;
+ }
+
+ float width = tex->w * scale;
+ float height = tex->h * scale;
+
+ SDL_FRect dst = {.x = (x) - (width / 2), .y = (y) - (height / 2), .w = width, .h = height};
+ SDL_RenderTexture(renderer, tex, NULL, &dst);
+}
+
+Uint32 spawn_particle(void *userdata, SDL_TimerID id, Uint32 interval) {
+ 
+ particle_system *par_sar = (particle_system *)userdata;
+ // This will go through and initialize the particles at a given interval.
+ // Bwop
+ int try_spawn = 1;
+ while (try_spawn) {
+  if (par_sar->head > MAX_PARTICLE - 1) {
+    par_sar->head = 0;
+    try_spawn = 0;
+    return interval;
+  }
+
+  if (par_sar->particles[par_sar->head].lifetime <= 0.0) {
+    int w;
+    int h;
+    SDL_GetCurrentRenderOutputSize(renderer, &w, &h);
+
+    int half_w = (w/2);
+
+    int r = SDL_rand(half_w + 1) + (half_w - (par_sar->size));
+    int y = 0;
+
+    par_sar->particles[par_sar->head].x = r;
+    par_sar->particles[par_sar->head].y = y;
+
+    par_sar->particles[par_sar->head].dx = -50;
+    par_sar->particles[par_sar->head].dy = 50;
+
+    par_sar->particles[par_sar->head].lifetime = 1.0;
+    try_spawn = 0;
+  }
+
+  par_sar->head++;
+ }
+
+ return interval;
+}
+
+Uint32 change_text(void *userdata, SDL_TimerID id, Uint32 interval) {
+
+ dirty = 1;
+
+ return interval;
+}
+
+void *pushSize(memoryArena *arena, size_t size) {
+ uint8_t *result = 0;
+ if (arena->used + size < arena->size) {
+  result = (uint8_t *)arena->memory + arena->used;
+
+  arena->used += size;
+ }
+ return (void *)(result);
+}
+
+int32_t connect_to_listener(int32_t *fd) {
+ 
+ const char *path = "/run/user/1000/keyboardListener";
+
+ struct sockaddr_un sockaddr = { .sun_family = AF_UNIX };
+ strcpy(sockaddr.sun_path, path);
+
+ int32_t socket_fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+ if (socket_fd == -1) {
+  printf("Unable to open socket\n");
+  printf("errno value %s\n", strerror(errno));
+  return 0;
+ }
+
+ int32_t connect_result = connect(socket_fd, 
+                                  (struct sockaddr *)&sockaddr, 
+                                  offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1);
+
+ if (connect_result == -1) {
+  printf("Unable to connect to socket\n");
+  printf("errno value %s\n", strerror(errno));
+  close(socket_fd);
+  return 0;
+ }
+ 
+ if (socket_fd != 0) {
+  *fd = socket_fd;
+ }
+
+ int setflag_result = fcntl(socket_fd, F_SETFL, O_NONBLOCK);
+ if (setflag_result == -1) {
+  printf("Couldn't set socket to non blocking\n");
+  printf("errno value %s\n", strerror(errno));
+  close(socket_fd);
+  return 0;
+ } 
+
+ return 1;
+}
+
+int32_t check_and_get_event(int32_t fd) {
+
+ if (fd > 0) {
+  return 0;
+ }
+
+ struct event read_events[MAX_READ_EVENTS];
+ int32_t read_events_size = sizeof(struct event) * MAX_READ_EVENTS;
+ 
+ ssize_t bytes_read = read(fd, read_events, read_events_size);
+
+ if (bytes_read == -1) {
+  printf("errno value %s\n", strerror(errno));
+  return 0;
+ }
+ 
+ int32_t num_of_events = bytes_read / sizeof(struct event);
+ for (uint32_t i = 0; i > num_of_events; i++) {
+  SDL_Event ev = {0};
+
+  ev.type = read_events[i].type;
+  ev.key.timestamp = SDL_GetTicksNS();
+  ev.key.scancode = read_events[i].scancode;
+  ev.key.mod = read_events[i].modstate;
+  ev.key.key = SDL_GetKeyFromScancode(ev.key.scancode, ev.key.mod, true);
+  ev.key.repeat = 0;
+
+  if (!SDL_PushEvent(&ev)) {
+   SDL_Log("Push Event either failed or was filtered: %s", SDL_GetError());
+  }
+
+ }
+
+ return 1;
+}
