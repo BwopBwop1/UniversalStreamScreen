@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/poll.h>
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include "SDL3/SDL.h"
@@ -33,6 +34,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #define MAX_READ_EVENTS 64
+#define MAX_PARTICLE 10
 
 #define SToMS(value) (value * 1000)
 #define MSToNS(value) (value * 1000000)
@@ -54,7 +56,6 @@ typedef struct memoryArena {
  void *memory;
 } memoryArena;
 
-#define MAX_PARTICLE 10
 typedef struct particle {
  float x, y;
  float dx, dy;
@@ -71,7 +72,7 @@ typedef struct particle_system {
 } particle_system;
 
 int32_t connect_to_listener(int32_t *fd);
-int32_t check_and_get_event(int32_t fd);
+int32_t check_and_get_event(int32_t fd, SDL_Window *win);
 
 void str_zero(uint8_t *b1);
 int32_t str_length(uint8_t *b1);
@@ -119,8 +120,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
  arena.size = Megabytes(2);
  arena.memory = malloc(arena.size);
-
- connect_to_listener(&file_descriptor);
 
  if (!SDL_Init(SDL_INIT_VIDEO)) {
   SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
@@ -178,12 +177,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  SDL_AddTimer(SToMS(1), spawn_particle, &ps);
  SDL_AddTimer(SToMS(15), change_text, 0);
  dirty = 1;
-
- //if (!SDL_SetWindowFullscreen(window, true)) {
-  //SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
-  //return SDL_APP_FAILURE;
- //}
-
+ 
+ if (!SDL_SetWindowFullscreen(window, true)) {
+  SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
+  return SDL_APP_FAILURE;
+ }
+ 
  lastMS = (SDL_GetTicks());
 
  int displayID = SDL_GetPrimaryDisplay();
@@ -196,15 +195,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   return SDL_APP_FAILURE;
  }
 
+ connect_to_listener(&file_descriptor);
+
  return SDL_APP_CONTINUE;  
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
  switch (event->type) {
   case SDL_EVENT_KEY_DOWN: {
-
-   printf("sdl: %s : %d : %d\n", SDL_GetKeyName(event->key.key), event->key.repeat, event->key.key);
-
    if (event->key.key == SDLK_ESCAPE && !event->key.repeat) {
     return SDL_APP_SUCCESS;
    } 
@@ -228,7 +226,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
  nowMS = SDL_GetTicks();
  float time_step = (float)(nowMS - lastMS) / 1000.0; // Seconds
 
- if (check_and_get_event(file_descriptor)) {
+ if (check_and_get_event(file_descriptor, window)) {
 
  } else {
   // TODO: Try and recoonect.
@@ -491,7 +489,6 @@ void *pushSize(memoryArena *arena, size_t size) {
 }
 
 int32_t connect_to_listener(int32_t *fd) {
- 
  const char *path = "/run/user/1000/keyboardListener";
 
  struct sockaddr_un sockaddr = { .sun_family = AF_UNIX };
@@ -501,7 +498,7 @@ int32_t connect_to_listener(int32_t *fd) {
  if (socket_fd == -1) {
   printf("Unable to open socket\n");
   printf("errno value %s\n", strerror(errno));
-  return 0;
+  return 1;
  }
 
  int32_t connect_result = connect(socket_fd, 
@@ -512,11 +509,7 @@ int32_t connect_to_listener(int32_t *fd) {
   printf("Unable to connect to socket\n");
   printf("errno value %s\n", strerror(errno));
   close(socket_fd);
-  return 0;
- }
- 
- if (socket_fd != 0) {
-  *fd = socket_fd;
+  return 1;
  }
 
  int setflag_result = fcntl(socket_fd, F_SETFL, O_NONBLOCK);
@@ -524,30 +517,33 @@ int32_t connect_to_listener(int32_t *fd) {
   printf("Couldn't set socket to non blocking\n");
   printf("errno value %s\n", strerror(errno));
   close(socket_fd);
-  return 0;
+  return 1;
  } 
 
- return 1;
-}
-
-int32_t check_and_get_event(int32_t fd) {
-
- if (fd > 0) {
-  return 0;
+ if (socket_fd != 0) {
+  *fd = socket_fd;
  }
 
+ return 0;
+}
+
+int32_t check_and_get_event(int32_t fd, SDL_Window *win) {
+
+ if (fd <= 0) {
+  return 0;
+ }
+ 
  struct event read_events[MAX_READ_EVENTS];
  int32_t read_events_size = sizeof(struct event) * MAX_READ_EVENTS;
- 
+
  ssize_t bytes_read = read(fd, read_events, read_events_size);
 
  if (bytes_read == -1) {
-  printf("errno value %s\n", strerror(errno));
   return 0;
  }
- 
+
  int32_t num_of_events = bytes_read / sizeof(struct event);
- for (uint32_t i = 0; i > num_of_events; i++) {
+ for (uint32_t i = 0; i < num_of_events; i++) {
   SDL_Event ev = {0};
 
   ev.type = read_events[i].type;
@@ -561,6 +557,8 @@ int32_t check_and_get_event(int32_t fd) {
    SDL_Log("Push Event either failed or was filtered: %s", SDL_GetError());
   }
 
+  //printf("ev type: %d", num_of_events);
+  //printf("num of events: %d", num_of_events);
  }
 
  return 1;
