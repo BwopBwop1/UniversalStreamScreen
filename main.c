@@ -128,7 +128,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  }
 
  if (!SDL_CreateWindowAndRenderer("Test Application", 
-			 0, 0, 
+			 960, 540, 
 			 SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS, &window, &renderer)) {
   SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
   return SDL_APP_FAILURE;
@@ -179,10 +179,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
  SDL_AddTimer(SToMS(15), change_text, 0);
  dirty = 1;
 
- if (!SDL_SetWindowFullscreen(window, true)) {
-  SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
-  return SDL_APP_FAILURE;
- }
+ //if (!SDL_SetWindowFullscreen(window, true)) {
+  //SDL_Log("Couldn't make window fullscreen: %s", SDL_GetError());
+  //return SDL_APP_FAILURE;
+ //}
 
  lastMS = (SDL_GetTicks());
 
