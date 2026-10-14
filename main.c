@@ -542,6 +542,11 @@ int32_t check_and_get_event(int32_t fd, SDL_Window *win) {
   return 0;
  }
 
+ uint32_t flags = SDL_GetWindowFlags(win);
+ if (flags & SDL_WINDOW_INPUT_FOCUS) {
+  return 0;
+ }
+
  int32_t num_of_events = bytes_read / sizeof(struct event);
  for (uint32_t i = 0; i < num_of_events; i++) {
   SDL_Event ev = {0};
